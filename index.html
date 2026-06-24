@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instructivo LOTO — Río Loa</title>
+    <title>Instructivo LOTTO — Río Loa</title>
     <meta name="theme-color" content="#2A5C6E">
 
     <script src="https://cdn.tailwindcss.com"></script>
@@ -52,8 +52,8 @@
         const IMPORTANTE_DEF = 'Su integridad física depende del correcto bloqueo y etiquetado que realice al equipo antes de su intervención.';
         const ANTES_STEPS = ['Coordinar detención del equipo con el responsable del área.', 'Una vez apagado el equipo, debe verificar la inexistencia de energía, presionando el botón de arranque.'];
         const RETIRAR_STEPS = ['Retirar herramientas.', 'Verificar que las protecciones de máquinas estén puestas.', 'Retirar candados, pinzas y etiquetas.', 'Confirmar que todos sus compañeros hayan retirado sus elementos de bloqueo/etiquetado y estén fuera del alcance de elementos móviles.', 'Energizar el equipo e informar finalización del servicio.'];
-        const SANCIONES_DEF = 'No respetar este procedimiento LOTO implica sanciones por incumplimiento, de acuerdo a lo establecido en el Reglamento Interno de Orden, Higiene y Seguridad de la Empresa.';
-        const METODO_DEF = '1. Girar desconectador local rojo a la izquierda, en posición OFF.\n2. Presionar los botones de encendido color verde para verificar inexistencia de energía.';
+        const SANCIONES_DEF = 'No respetar este procedimiento LOTTO implica sanciones por incumplimiento, de acuerdo a lo establecido en el Reglamento Interno de Orden, Higiene y Seguridad de la Empresa.';
+        const METODO_STEPS = ['Girar desconectador local rojo a la izquierda, en posición OFF.', 'Presionar los botones de encendido color verde para verificar inexistencia de energía.'];
         const DISP_DEF = 'Instalar los siguientes elementos en el desconectador local: pinza, candado y tarjeta.';
 
         // ═══════════════════════════ CONSTANTES ═══════════════════════════
@@ -88,7 +88,9 @@
             sanciones: SANCIONES_DEF,
             elaboradoPor: '', cargo: '', firma: null,
         });
-        const nuevoPunto = () => ({ id: Date.now() + Math.floor(Math.random() * 1000), tipo: 'Eléctrica', descripcion: '', metodo: METODO_DEF, metodoFotos: [], dispositivo: DISP_DEF, dispFotos: [] });
+        const nuevoPunto = () => ({ id: Date.now() + Math.floor(Math.random() * 1000), tipo: 'Eléctrica', descripcion: '', metodoSteps: [...METODO_STEPS], metodoFotos: [], dispositivo: DISP_DEF, dispFotos: [] });
+        // Asegura que cada punto tenga metodoSteps (migra datos antiguos que tenían 'metodo' como texto)
+        const normData = (d) => { if (!d || typeof d !== 'object') return d; const puntos = (d.puntos || []).map(p => ({ ...p, metodoSteps: Array.isArray(p.metodoSteps) ? p.metodoSteps : (p.metodo ? String(p.metodo).split('\n').map(s => s.replace(/^\s*\d+[\.\)]\s*/, '').trim()).filter(Boolean) : [...METODO_STEPS]) })); return { ...d, puntos }; };
 
         // ═══════════════════════════ ICONOS ═══════════════════════════
         const I = ({ children, size = 20, className = "" }) => (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>);
@@ -179,7 +181,7 @@
 
         // ═══════════════════════════ APP ═══════════════════════════
         const App = () => {
-            const [data, setData] = useState(() => { try { const r = localStorage.getItem(DRAFT_KEY); if (r) return { ...defaultData(), ...JSON.parse(r) }; } catch (e) {} return defaultData(); });
+            const [data, setData] = useState(() => { try { const r = localStorage.getItem(DRAFT_KEY); if (r) return normData({ ...defaultData(), ...JSON.parse(r) }); } catch (e) {} return defaultData(); });
             const [lib, setLib] = useState(() => { try { const r = localStorage.getItem(LIB_KEY); if (r) return JSON.parse(r) || []; } catch (e) {} return []; });
             const [cargadoDeId, setCargadoDeId] = useState(null);
             const [libOpen, setLibOpen] = useState(false);
@@ -205,6 +207,11 @@
             const movePunto = (id, dir) => setData(prev => { const a = [...prev.puntos]; const i = a.findIndex(p => p.id === id), j = i + dir; if (i < 0 || j < 0 || j >= a.length) return prev; [a[i], a[j]] = [a[j], a[i]]; return { ...prev, puntos: a }; });
             const addFoto = (id, campo, url) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, [campo]: [...(p[campo] || []), url].slice(0, MAX_FOTOS) } : p) }));
             const delFoto = (id, campo, k) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, [campo]: (p[campo] || []).filter((_, x) => x !== k) } : p) }));
+            // Pasos del MÉTODO (por punto)
+            const addPasoMet = (id) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, metodoSteps: [...(p.metodoSteps || []), ''] } : p) }));
+            const updPasoMet = (id, i, v) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, metodoSteps: (p.metodoSteps || []).map((s, k) => k === i ? v : s) } : p) }));
+            const delPasoMet = (id, i) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, metodoSteps: (p.metodoSteps || []).filter((_, k) => k !== i) } : p) }));
+            const movePasoMet = (id, i, dir) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => { if (p.id !== id) return p; const a = [...(p.metodoSteps || [])]; const j = i + dir; if (j < 0 || j >= a.length) return p; [a[i], a[j]] = [a[j], a[i]]; return { ...p, metodoSteps: a }; }) }));
 
             // Pasos antes del bloqueo (lista dinámica)
             const pasosA = data.pasosAntesSteps || [];
@@ -230,11 +237,11 @@
                     setSaveNote('Guardado en biblioteca'); setLibOpen(true);
                 } catch (e) { alert('No se pudo guardar en la biblioteca (almacenamiento lleno). Exporta un respaldo y libera espacio.'); }
             };
-            const cargarBiblioteca = (it) => { setData({ ...defaultData(), ...JSON.parse(JSON.stringify(it.data)) }); setCargadoDeId(it.id); setLibOpen(false); window.scrollTo(0, 0); };
+            const cargarBiblioteca = (it) => { setData(normData({ ...defaultData(), ...JSON.parse(JSON.stringify(it.data)) })); setCargadoDeId(it.id); setLibOpen(false); window.scrollTo(0, 0); };
             const eliminarBiblioteca = (id) => { if (confirm('¿Eliminar este instructivo de la biblioteca?')) { setLib(prev => prev.filter(it => it.id !== id)); if (cargadoDeId === id) setCargadoDeId(null); } };
             const nuevoInstructivo = () => { if (confirm('¿Empezar un instructivo nuevo en blanco? (la biblioteca no se borra)')) { setData(defaultData()); setCargadoDeId(null); window.scrollTo(0, 0); } };
 
-            const exportarRespaldo = () => descargar(new Blob([JSON.stringify({ draft: data, lib }, null, 2)], { type: 'application/json' }), `respaldo_loto_${new Date().toISOString().slice(0, 10)}.json`);
+            const exportarRespaldo = () => descargar(new Blob([JSON.stringify({ draft: data, lib }, null, 2)], { type: 'application/json' }), `respaldo_lotto_${new Date().toISOString().slice(0, 10)}.json`);
             const importarRespaldo = (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const r = new FileReader(); r.onload = () => { try { const o = JSON.parse(r.result); if (o.lib && Array.isArray(o.lib) && confirm('¿Reemplazar la biblioteca con el respaldo?')) setLib(o.lib); if (o.draft) setData({ ...defaultData(), ...o.draft }); } catch (err) { alert('Respaldo no válido: ' + err.message); } }; r.readAsText(f); };
 
             // Abrir un PDF creado por esta app y reconstruir el instructivo editable (con fotos).
@@ -255,7 +262,7 @@
                         const obj = JSON.parse(json);
                         const d = obj && obj.data ? obj.data : obj;
                         if (!d || typeof d !== 'object' || !('puntos' in d)) throw new Error('Los datos del PDF no son válidos.');
-                        setData({ ...defaultData(), ...d });
+                        setData(normData({ ...defaultData(), ...d }));
                         setCargadoDeId(null); setArranqueOpen(false); window.scrollTo(0, 0); setSaveNote('PDF abierto para editar');
                     } catch (err) { alert('No se pudo abrir el PDF: ' + err.message); }
                 };
@@ -277,7 +284,7 @@
                     pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(40, 40, 40);
                     pdf.text('INSTRUCTIVO DE BLOQUEO Y ETIQUETADO', PW / 2, 11, { align: 'center' });
                     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(110, 110, 110);
-                    pdf.text('LOTO — Lockout / Tagout', PW / 2, 16, { align: 'center' });
+                    pdf.text('LOTTO — Lockout / Tagout', PW / 2, 16, { align: 'center' });
                     pdf.setFontSize(7); pdf.setTextColor(90, 90, 90);
                     pdf.text(`Código: ${data.codigo || '—'}`, PW - MR, 8, { align: 'right' });
                     pdf.text(`Versión: ${data.version || '—'}`, PW - MR, 12, { align: 'right' });
@@ -297,7 +304,8 @@
 
                 const drawPunto = (p, i) => {
                     const pad = 3, colW = CW / 2;
-                    const mLines = pdf.splitTextToSize(p.metodo || '—', colW - 2 * pad);
+                    const mTexto = (p.metodoSteps && p.metodoSteps.length) ? p.metodoSteps.map((s, k) => `${k + 1}) ${s}`).join('\n') : (p.metodo || '—');
+                    const mLines = pdf.splitTextToSize(mTexto, colW - 2 * pad);
                     const dLines = pdf.splitTextToSize(p.dispositivo || '—', colW - 2 * pad);
                     pdf.setFontSize(8.5); const idLines = pdf.splitTextToSize('Identificación / ubicación: ' + (p.descripcion || '—'), CW);
                     const barH = 8, subH = 6, idH = idLines.length * 4.4 + 2;
@@ -398,9 +406,9 @@
                 try {
                     const built = buildPDF(); pdf = built.pdf; filename = built.filename;
                     const file = new File([pdfConDatos(pdf)], filename, { type: 'application/pdf' });
-                    const texto = `Instructivo LOTO — ${data.equipo || ''}${data.area ? ' · ' + data.area : ''}. Adjunto el PDF.`;
+                    const texto = `Instructivo LOTTO — ${data.equipo || ''}${data.area ? ' · ' + data.area : ''}. Adjunto el PDF.`;
                     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                        await navigator.share({ files: [file], title: 'Instructivo LOTO — Río Loa', text: texto });
+                        await navigator.share({ files: [file], title: 'Instructivo LOTTO — Río Loa', text: texto });
                     } else {
                         descargar(pdfConDatos(pdf), filename);
                         alert('Este navegador no permite compartir el PDF automáticamente, así que se descargó.\n\nPara enviarlo por WhatsApp directo, abre la app en Chrome desde el celular.');
@@ -408,7 +416,7 @@
                 } catch (e) {
                     if (e && e.name === 'AbortError') { setIsGenerating(false); return; }
                     console.error(e);
-                    try { if (pdf) pdf.save(filename || 'LOTO.pdf'); } catch (x) {}
+                    try { if (pdf) pdf.save(filename || 'Lotto.pdf'); } catch (x) {}
                     alert('No se pudo compartir automáticamente; se descargó el PDF.');
                 } finally { setIsGenerating(false); }
             };
@@ -440,7 +448,7 @@
                         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
                             <LogoRioLoa height={30} />
                             <div className="hidden sm:block border-l border-slate-200 pl-3">
-                                <div className="text-sm font-black uppercase tracking-tight text-slate-700 leading-none">Instructivo LOTO</div>
+                                <div className="text-sm font-black uppercase tracking-tight text-slate-700 leading-none">Instructivo LOTTO</div>
                                 <div className="text-[11px] text-slate-400 uppercase tracking-wide">Bloqueo y etiquetado</div>
                             </div>
                             <div className="ml-auto flex items-center gap-2">
@@ -532,8 +540,24 @@
                                             </div>
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div className="space-y-2">
-                                                    <Label>Método</Label>
-                                                    <textarea lang="es" spellCheck={true} className={`${inputCls} h-28`} value={p.metodo} onChange={e => updPunto(p.id, 'metodo', e.target.value)} />
+                                                    <div className="flex items-center justify-between">
+                                                        <Label>Método (pasos)</Label>
+                                                        <button onClick={() => addPasoMet(p.id)} className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-white" style={{ background: TEAL }}><Plus size={12} /> Paso</button>
+                                                    </div>
+                                                    {(p.metodoSteps || []).length === 0 && <p className="text-[11px] text-slate-400 italic">Sin pasos. Toca “Paso” para agregar.</p>}
+                                                    <div className="space-y-1.5">
+                                                        {(p.metodoSteps || []).map((s, k) => (
+                                                            <div key={k} className="flex items-start gap-1.5">
+                                                                <span className="mt-2.5 text-xs font-black tabular-nums shrink-0" style={{ color: TEAL }}>{k + 1})</span>
+                                                                <textarea lang="es" spellCheck={true} className={`${inputCls} h-12 flex-1`} value={s} onChange={e => updPasoMet(p.id, k, e.target.value)} placeholder={`Paso ${k + 1}…`} />
+                                                                <div className="flex flex-col items-center pt-0.5 shrink-0">
+                                                                    <button onClick={() => movePasoMet(p.id, k, -1)} disabled={k === 0} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none text-xs" title="Subir">▲</button>
+                                                                    <button onClick={() => movePasoMet(p.id, k, 1)} disabled={k === (p.metodoSteps || []).length - 1} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none text-xs" title="Bajar">▼</button>
+                                                                    <button onClick={() => delPasoMet(p.id, k)} className="text-slate-400 hover:text-red-500 mt-0.5" title="Eliminar"><Trash2 size={13} /></button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
                                                     <MultiFoto fotos={p.metodoFotos || []} onAdd={v => addFoto(p.id, 'metodoFotos', v)} onRemove={k => delFoto(p.id, 'metodoFotos', k)} label="Foto del método" />
                                                 </div>
                                                 <div className="space-y-2">
