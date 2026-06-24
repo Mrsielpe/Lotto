@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instructivo LOTO — Río Loa</title>
+    <meta name="theme-color" content="#2A5C6E">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        body { background-color: #eef2f5; }
+        @media print { .no-print { display: none !important; } }
+        textarea { resize: vertical; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/plain" id="app-source">
+        const { useState, useEffect, useRef } = React;
+
+        // ═══════════════════════════ LISTAS EDITABLES ═══════════════════════════
+        const AREAS = [
+            'Batch House', 'Área Subterráneo / Bases (Batch House)', 'Galpón Soda',
+            'Planta Molienda (Chancado)', 'Hornos', 'Bodega de Despacho / Bodegas',
+            'Área de Descarga', 'Pintado', 'Corona',
+        ];
+        const RESPONSABLES = [
+            { grupo: 'Administración / APR', personas: [
+                { n: 'Héctor Arce Matta', cargo: 'Administrador de Contrato' },
+                { n: 'Braulio Sielpe', cargo: 'APR' },
+                { n: 'Víctor Donoso', cargo: 'APR' },
+            ]},
+            { grupo: 'Supervisores', personas: [
+                { n: 'Edward Miño', cargo: 'Supervisor' },
+                { n: 'Sergio Rojas', cargo: 'Supervisor' },
+                { n: 'Manuel Fuentes', cargo: 'Supervisor' },
+                { n: 'Guillermo Oneto', cargo: 'Supervisor' },
+            ]},
+        ];
+        const cargoDe = (n) => { for (const g of RESPONSABLES) { const p = g.personas.find(x => x.n === n); if (p) return p.cargo; } return ''; };
+        const TIPOS_ENERGIA = ['Eléctrica', 'Mecánica', 'Neumática', 'Hidráulica', 'Gravitacional', 'Térmica'];
+        const MAX_FOTOS = 3;
+        const FIRMA_COLOR = '#1d4ed8'; // azul
+
+        // Textos por defecto (tomados del instructivo modelo)
+        const IMPORTANTE_DEF = 'Su integridad física depende del correcto bloqueo y etiquetado que realice al equipo antes de su intervención.';
+        const ANTES_STEPS = ['Coordinar detención del equipo con el responsable del área.', 'Una vez apagado el equipo, debe verificar la inexistencia de energía, presionando el botón de arranque.'];
+        const RETIRAR_STEPS = ['Retirar herramientas.', 'Verificar que las protecciones de máquinas estén puestas.', 'Retirar candados, pinzas y etiquetas.', 'Confirmar que todos sus compañeros hayan retirado sus elementos de bloqueo/etiquetado y estén fuera del alcance de elementos móviles.', 'Energizar el equipo e informar finalización del servicio.'];
+        const SANCIONES_DEF = 'No respetar este procedimiento LOTO implica sanciones por incumplimiento, de acuerdo a lo establecido en el Reglamento Interno de Orden, Higiene y Seguridad de la Empresa.';
+        const METODO_DEF = '1. Girar desconectador local rojo a la izquierda, en posición OFF.\n2. Presionar los botones de encendido color verde para verificar inexistencia de energía.';
+        const DISP_DEF = 'Instalar los siguientes elementos en el desconectador local: pinza, candado y tarjeta.';
+
+        // ═══════════════════════════ CONSTANTES ═══════════════════════════
+        const DRAFT_KEY = 'rioloa_loto_draft_v1';
+        const LIB_KEY = 'rioloa_loto_lib_v1';
+        const ESCALA_KEY = 'rioloa_loto_escala';
+        const EJECUTORA = 'Maquinarias y Construcciones Río Loa S.A.';
+        const ESCALAS = [{ id: 'Normal', px: 16 }, { id: 'Grande', px: 18.5 }, { id: 'Extra', px: 21 }];
+
+        const imgFormat = (d) => { const m = /^data:image\/(\w+);/.exec(d || ''); const f = m ? m[1].toUpperCase() : 'PNG'; return f === 'JPG' ? 'JPEG' : f; };
+        const fileToDataURL = (file, cb) => { const r = new FileReader(); r.onloadend = () => cb(r.result); r.readAsDataURL(file); };
+        const descargar = (blob, filename) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1500); };
+        const compressImage = (file, cb, maxDim = 1280, quality = 0.72) => {
+            const toCanvas = (src, w0, h0) => {
+                let w = w0, h = h0;
+                if (w > maxDim || h > maxDim) { if (w >= h) { h = Math.round(h * maxDim / w); w = maxDim; } else { w = Math.round(w * maxDim / h); h = maxDim; } }
+                const c = document.createElement('canvas'); c.width = w; c.height = h;
+                const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(src, 0, 0, w, h);
+                return c.toDataURL('image/jpeg', quality);
+            };
+            const viaReader = () => { const r = new FileReader(); r.onload = (ev) => { const img = new Image(); img.onload = () => { try { cb(toCanvas(img, img.width, img.height)); } catch (e) { cb(ev.target.result); } }; img.onerror = () => cb(ev.target.result); img.src = ev.target.result; }; r.readAsDataURL(file); };
+            if (window.createImageBitmap) { createImageBitmap(file, { imageOrientation: 'from-image' }).then(b => { try { cb(toCanvas(b, b.width, b.height)); } catch (e) { viaReader(); } if (b.close) b.close(); }).catch(viaReader); } else { viaReader(); }
+        };
+
+        const defaultData = () => ({
+            codigo: 'REG-PTS-MEC-020', version: '01', fecha: new Date().toLocaleDateString('es-CL'), logo: null,
+            equipo: '', area: '', ubicacion: '', descripcion: '',
+            importante: IMPORTANTE_DEF,
+            pasosAntesSteps: [...ANTES_STEPS],
+            puntos: [],
+            pasosRetirarSteps: [...RETIRAR_STEPS],
+            sanciones: SANCIONES_DEF,
+            elaboradoPor: '', cargo: '', firma: null,
+        });
+        const nuevoPunto = () => ({ id: Date.now() + Math.floor(Math.random() * 1000), tipo: 'Eléctrica', descripcion: '', metodo: METODO_DEF, metodoFotos: [], dispositivo: DISP_DEF, dispFotos: [] });
+
+        // ═══════════════════════════ ICONOS ═══════════════════════════
+        const I = ({ children, size = 20, className = "" }) => (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>);
+        const Plus = (p) => <I {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></I>;
+        const Trash2 = (p) => <I {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></I>;
+        const Download = (p) => <I {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></I>;
+        const Upload = (p) => <I {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></I>;
+        const Eye = (p) => <I {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></I>;
+        const XCircle = (p) => <I {...p}><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></I>;
+        const Loader = (p) => <I {...p}><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></I>;
+        const Camera = (p) => <I {...p}><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></I>;
+        const Save = (p) => <I {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></I>;
+        const RotateCcw = (p) => <I {...p}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></I>;
+        const Printer = (p) => <I {...p}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></I>;
+        const Send = (p) => <I {...p}><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></I>;
+        const Settings = (p) => <I {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></I>;
+        const Book = (p) => <I {...p}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></I>;
+        const FilePlus = (p) => <I {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></I>;
+        const Database = (p) => <I {...p}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></I>;
+        const Zap = (p) => <I {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></I>;
+
+        const TEAL = '#2A5C6E', BLUE = '#4A90B8';
+        const LogoRioLoa = ({ height = 30 }) => (
+            <svg height={height} viewBox="0 0 230 60" xmlns="http://www.w3.org/2000/svg" style={{ display: 'block' }}>
+                <text x="0" y="47" fontFamily="Arial, Helvetica, sans-serif" fontWeight="900" fontSize="54" letterSpacing="-3"><tspan fill={TEAL}>RIO</tspan><tspan fill={BLUE}>LOA</tspan></text>
+            </svg>
+        );
+        const Section = ({ n, title, right, children }) => (
+            <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+                    <h2 className="flex items-center gap-2 font-black uppercase tracking-tight text-slate-700"><span className="flex items-center justify-center w-6 h-6 rounded-md text-white text-xs" style={{ background: TEAL }}>{n}</span>{title}</h2>
+                    {right}
+                </div>
+                <div className="p-5">{children}</div>
+            </section>
+        );
+
+        // ── Varias fotos ──
+        const MultiFoto = ({ fotos, onAdd, onRemove, label }) => {
+            const recibir = (e) => { Array.from(e.target.files || []).forEach(f => compressImage(f, onAdd)); e.target.value = ''; };
+            return (
+                <div>
+                    {fotos.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                            {fotos.map((src, k) => (
+                                <div key={k} className="relative">
+                                    <img src={src} className="w-full h-20 object-cover rounded-lg border border-slate-200" />
+                                    <button onClick={() => onRemove(k)} className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full p-0.5 shadow hover:bg-red-600 transition"><XCircle size={15} /></button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {fotos.length < MAX_FOTOS && (
+                        <label className="w-full border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center py-3 cursor-pointer text-slate-500 hover:bg-slate-50 hover:border-sky-400 transition">
+                            <input type="file" accept="image/*" multiple className="hidden" onChange={recibir} />
+                            <Camera size={20} /><span className="text-[11px] mt-0.5 font-bold">{label || 'Agregar foto'}</span>
+                        </label>
+                    )}
+                </div>
+            );
+        };
+
+        // ── Pad de firma (azul) ──
+        const FirmaPad = ({ value, onChange }) => {
+            const ref = useRef(null), drawing = useRef(false), last = useRef(null);
+            useEffect(() => {
+                const c = ref.current, ctx = c.getContext('2d');
+                ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+                ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = FIRMA_COLOR;
+                if (value) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, c.width, c.height); img.src = value; }
+            }, []);
+            const pt = (e) => { const c = ref.current, r = c.getBoundingClientRect(); return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) }; };
+            const down = (e) => { e.preventDefault(); drawing.current = true; last.current = pt(e); try { e.target.setPointerCapture(e.pointerId); } catch (x) {} };
+            const move = (e) => { if (!drawing.current) return; const ctx = ref.current.getContext('2d'); const p = pt(e); ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last.current = p; };
+            const up = () => { if (!drawing.current) return; drawing.current = false; onChange(ref.current.toDataURL('image/png')); };
+            const clear = () => { const c = ref.current, ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); onChange(null); };
+            return (
+                <div>
+                    <canvas ref={ref} width={560} height={180} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
+                        style={{ width: '100%', maxWidth: '560px', height: '180px', border: '2px dashed #cbd5e1', borderRadius: '12px', background: '#fff', touchAction: 'none', cursor: 'crosshair', display: 'block' }} />
+                    <div className="flex items-center gap-3 mt-2">
+                        <button onClick={clear} className="text-xs text-slate-500 hover:text-red-500 font-semibold flex items-center gap-1"><RotateCcw size={13} /> Borrar firma</button>
+                        <span className="text-[11px]" style={{ color: FIRMA_COLOR }}>Dibuja tu firma — el trazo queda en azul.</span>
+                    </div>
+                </div>
+            );
+        };
+
+        // ═══════════════════════════ APP ═══════════════════════════
+        const App = () => {
+            const [data, setData] = useState(() => { try { const r = localStorage.getItem(DRAFT_KEY); if (r) return { ...defaultData(), ...JSON.parse(r) }; } catch (e) {} return defaultData(); });
+            const [lib, setLib] = useState(() => { try { const r = localStorage.getItem(LIB_KEY); if (r) return JSON.parse(r) || []; } catch (e) {} return []; });
+            const [cargadoDeId, setCargadoDeId] = useState(null);
+            const [libOpen, setLibOpen] = useState(false);
+            const [ajustesOpen, setAjustesOpen] = useState(false);
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [saveNote, setSaveNote] = useState('Guardado');
+            const [escalaIdx, setEscalaIdx] = useState(() => { try { return Math.min(2, Math.max(0, parseInt(localStorage.getItem(ESCALA_KEY) || '0', 10) || 0)); } catch (e) { return 0; } });
+
+            useEffect(() => { document.documentElement.style.fontSize = ESCALAS[escalaIdx].px + 'px'; try { localStorage.setItem(ESCALA_KEY, String(escalaIdx)); } catch (e) {} }, [escalaIdx]);
+            useEffect(() => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); setSaveNote('Guardado'); } catch (e) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...data, logo: null, firma: null, puntos: data.puntos.map(p => ({ ...p, metodoFotos: [], dispFotos: [] })) })); setSaveNote('Guardado (sin imágenes por tamaño)'); } catch (e2) { setSaveNote('No se pudo guardar'); } } }, [data]);
+            useEffect(() => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch (e) {} }, [lib]);
+
+            const set = (campo, valor) => setData(prev => ({ ...prev, [campo]: valor }));
+            const selResp = (n) => setData(prev => ({ ...prev, elaboradoPor: n, cargo: cargoDe(n) }));
+
+            // Puntos
+            const addPunto = () => setData(prev => ({ ...prev, puntos: [...prev.puntos, nuevoPunto()] }));
+            const updPunto = (id, campo, valor) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, [campo]: valor } : p) }));
+            const delPunto = (id) => { if (confirm('¿Eliminar este punto de bloqueo?')) setData(prev => ({ ...prev, puntos: prev.puntos.filter(p => p.id !== id) })); };
+            const movePunto = (id, dir) => setData(prev => { const a = [...prev.puntos]; const i = a.findIndex(p => p.id === id), j = i + dir; if (i < 0 || j < 0 || j >= a.length) return prev; [a[i], a[j]] = [a[j], a[i]]; return { ...prev, puntos: a }; });
+            const addFoto = (id, campo, url) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, [campo]: [...(p[campo] || []), url].slice(0, MAX_FOTOS) } : p) }));
+            const delFoto = (id, campo, k) => setData(prev => ({ ...prev, puntos: prev.puntos.map(p => p.id === id ? { ...p, [campo]: (p[campo] || []).filter((_, x) => x !== k) } : p) }));
+
+            // Pasos antes del bloqueo (lista dinámica)
+            const pasosA = data.pasosAntesSteps || [];
+            const addPasoA = () => setData(prev => ({ ...prev, pasosAntesSteps: [...(prev.pasosAntesSteps || []), ''] }));
+            const updPasoA = (i, v) => setData(prev => ({ ...prev, pasosAntesSteps: (prev.pasosAntesSteps || []).map((s, k) => k === i ? v : s) }));
+            const delPasoA = (i) => setData(prev => ({ ...prev, pasosAntesSteps: (prev.pasosAntesSteps || []).filter((_, k) => k !== i) }));
+            const movePasoA = (i, dir) => setData(prev => { const a = [...(prev.pasosAntesSteps || [])]; const j = i + dir; if (j < 0 || j >= a.length) return prev; [a[i], a[j]] = [a[j], a[i]]; return { ...prev, pasosAntesSteps: a }; });
+
+            // Pasos para retirar (lista dinámica)
+            const pasos = data.pasosRetirarSteps || [];
+            const addPaso = () => setData(prev => ({ ...prev, pasosRetirarSteps: [...(prev.pasosRetirarSteps || []), ''] }));
+            const updPaso = (i, v) => setData(prev => ({ ...prev, pasosRetirarSteps: (prev.pasosRetirarSteps || []).map((s, k) => k === i ? v : s) }));
+            const delPaso = (i) => setData(prev => ({ ...prev, pasosRetirarSteps: (prev.pasosRetirarSteps || []).filter((_, k) => k !== i) }));
+            const movePaso = (i, dir) => setData(prev => { const a = [...(prev.pasosRetirarSteps || [])]; const j = i + dir; if (j < 0 || j >= a.length) return prev; [a[i], a[j]] = [a[j], a[i]]; return { ...prev, pasosRetirarSteps: a }; });
+
+            // Biblioteca
+            const guardarBiblioteca = () => {
+                if (!data.equipo.trim()) { alert('Escribe el nombre del equipo antes de guardar en la biblioteca.'); return; }
+                const stamp = new Date().toLocaleString('es-CL');
+                try {
+                    if (cargadoDeId) setLib(prev => prev.map(it => it.id === cargadoDeId ? { ...it, equipo: data.equipo, area: data.area, savedAt: stamp, data: JSON.parse(JSON.stringify(data)) } : it));
+                    else { const id = Date.now(); setLib(prev => [...prev, { id, equipo: data.equipo, area: data.area, savedAt: stamp, data: JSON.parse(JSON.stringify(data)) }]); setCargadoDeId(id); }
+                    setSaveNote('Guardado en biblioteca'); setLibOpen(true);
+                } catch (e) { alert('No se pudo guardar en la biblioteca (almacenamiento lleno). Exporta un respaldo y libera espacio.'); }
+            };
+            const cargarBiblioteca = (it) => { setData({ ...defaultData(), ...JSON.parse(JSON.stringify(it.data)) }); setCargadoDeId(it.id); setLibOpen(false); window.scrollTo(0, 0); };
+            const eliminarBiblioteca = (id) => { if (confirm('¿Eliminar este instructivo de la biblioteca?')) { setLib(prev => prev.filter(it => it.id !== id)); if (cargadoDeId === id) setCargadoDeId(null); } };
+            const nuevoInstructivo = () => { if (confirm('¿Empezar un instructivo nuevo en blanco? (la biblioteca no se borra)')) { setData(defaultData()); setCargadoDeId(null); window.scrollTo(0, 0); } };
+
+            const exportarRespaldo = () => descargar(new Blob([JSON.stringify({ draft: data, lib }, null, 2)], { type: 'application/json' }), `respaldo_loto_${new Date().toISOString().slice(0, 10)}.json`);
+            const importarRespaldo = (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const r = new FileReader(); r.onload = () => { try { const o = JSON.parse(r.result); if (o.lib && Array.isArray(o.lib) && confirm('¿Reemplazar la biblioteca con el respaldo?')) setLib(o.lib); if (o.draft) setData({ ...defaultData(), ...o.draft }); } catch (err) { alert('Respaldo no válido: ' + err.message); } }; r.readAsText(f); };
+
+            // ─────────── PDF ───────────
+            const validar = () => { if (!data.equipo.trim()) { alert('Escribe el nombre del equipo.'); return false; } if (data.puntos.length === 0) { alert('Agrega al menos un punto de bloqueo.'); return false; } return true; };
+
+            const buildPDF = () => {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const PW = 210, PH = 297, ML = 14, MR = 14, MB = 14, CW = PW - ML - MR;
+                let curY = 0;
+
+                const drawLogoText = () => { pdf.setFont('helvetica', 'bold'); pdf.setFontSize(18); pdf.setTextColor(42, 92, 110); pdf.text('RIO', ML, 14); const w = pdf.getTextWidth('RIO'); pdf.setTextColor(74, 144, 184); pdf.text('LOA', ML + w, 14); };
+                const drawHeader = () => {
+                    if (data.logo) { try { const pr = pdf.getImageProperties(data.logo); const lh = 11, lw = Math.min(lh * (pr.width / pr.height), 52); pdf.addImage(data.logo, imgFormat(data.logo), ML, 5, lw, lh); } catch (e) { drawLogoText(); } } else drawLogoText();
+                    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(12); pdf.setTextColor(40, 40, 40);
+                    pdf.text('INSTRUCTIVO DE BLOQUEO Y ETIQUETADO', PW / 2, 11, { align: 'center' });
+                    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(110, 110, 110);
+                    pdf.text('LOTO — Lockout / Tagout', PW / 2, 16, { align: 'center' });
+                    pdf.setFontSize(7); pdf.setTextColor(90, 90, 90);
+                    pdf.text(`Código: ${data.codigo || '—'}`, PW - MR, 8, { align: 'right' });
+                    pdf.text(`Versión: ${data.version || '—'}`, PW - MR, 12, { align: 'right' });
+                    pdf.text(`Fecha: ${data.fecha || '—'}`, PW - MR, 16, { align: 'right' });
+                    pdf.setDrawColor(42, 92, 110); pdf.setLineWidth(0.6); pdf.line(ML, 21, PW - MR, 21);
+                    curY = 28;
+                };
+                const newPage = () => { pdf.addPage(); drawHeader(); };
+                const ensureSpace = (n) => { if (curY + n > PH - MB) newPage(); };
+                const sectionTitle = (txt) => { ensureSpace(12); pdf.setFillColor(42, 92, 110); pdf.rect(ML, curY, CW, 7, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text(txt.toUpperCase(), ML + 3, curY + 4.9); pdf.setTextColor(0, 0, 0); curY += 10; };
+                const fieldRow = (label, value) => { ensureSpace(7); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.setTextColor(100, 100, 100); pdf.text(label.toUpperCase(), ML, curY + 3.5); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(20, 20, 20); const lines = pdf.splitTextToSize(value || '—', CW - 42); pdf.text(lines, ML + 40, curY + 3.5); pdf.setDrawColor(225, 225, 225); pdf.line(ML, curY + 6, ML + CW, curY + 6); curY += Math.max(7, lines.length * 4.5 + 2); };
+                const blockText = (value) => { pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(30, 30, 30); const lines = pdf.splitTextToSize(value || '—', CW); lines.forEach(l => { ensureSpace(5); pdf.text(l, ML, curY + 3); curY += 4.6; }); curY += 2; };
+                const noteBox = (value, color) => { const c = color || [220, 38, 38]; pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); const lines = pdf.splitTextToSize(value || '', CW - 8); const h = lines.length * 4.6 + 6; ensureSpace(h); pdf.setFillColor(c[0], c[1], c[2], 0.08); pdf.setDrawColor(c[0], c[1], c[2]); pdf.setLineWidth(0.4); pdf.setFillColor(255, 247, 237); pdf.rect(ML, curY, CW, h, 'FD'); pdf.setTextColor(c[0], c[1], c[2]); let y = curY + 5; lines.forEach(l => { pdf.text(l, ML + 4, y); y += 4.6; }); curY += h + 3; };
+
+                const colH = (lines, fotos, colW, pad) => { let h = lines.length * 4.4 + 3; (fotos || []).forEach(f => { try { const pr = pdf.getImageProperties(f); let ph = (colW - 2 * pad) / (pr.width / pr.height); if (ph > 42) ph = 42; h += ph + 2; } catch (e) { h += 2; } }); return h; };
+                const drawCol = (x, y0, lines, fotos, colW, pad) => { let y = y0; pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); pdf.setTextColor(30, 30, 30); lines.forEach(l => { pdf.text(l, x + pad, y + 3); y += 4.4; }); y += 1; (fotos || []).forEach(f => { try { const pr = pdf.getImageProperties(f); let w = colW - 2 * pad, ph = w / (pr.width / pr.height); if (ph > 42) { ph = 42; w = ph * (pr.width / pr.height); } const cx = x + (colW - w) / 2; pdf.addImage(f, imgFormat(f), cx, y + 1, w, ph); pdf.setDrawColor(210, 210, 210); pdf.setLineWidth(0.3); pdf.rect(cx, y + 1, w, ph); y += ph + 2; } catch (e) {} }); return y; };
+
+                const drawPunto = (p, i) => {
+                    const pad = 3, colW = CW / 2;
+                    const mLines = pdf.splitTextToSize(p.metodo || '—', colW - 2 * pad);
+                    const dLines = pdf.splitTextToSize(p.dispositivo || '—', colW - 2 * pad);
+                    pdf.setFontSize(8.5); const idLines = pdf.splitTextToSize('Identificación / ubicación: ' + (p.descripcion || '—'), CW);
+                    const barH = 8, subH = 6, idH = idLines.length * 4.4 + 2;
+                    const bodyH = Math.max(colH(mLines, p.metodoFotos, colW, pad), colH(dLines, p.dispFotos, colW, pad)) + 2;
+                    ensureSpace(Math.min(barH + idH + subH + bodyH + 5, PH - MB - 29));
+                    // barra
+                    pdf.setFillColor(42, 92, 110); pdf.rect(ML, curY, CW, barH, 'F');
+                    pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text(`PUNTO N° ${i + 1}`, ML + 3, curY + 5.4);
+                    pdf.setFontSize(7.5); pdf.text(`Energía: ${p.tipo || '—'}`, ML + CW - 3, curY + 5.4, { align: 'right' });
+                    curY += barH + 1;
+                    // id
+                    pdf.setTextColor(40, 40, 40); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); idLines.forEach(l => { pdf.text(l, ML, curY + 3); curY += 4.4; }); curY += 1;
+                    // sub-encabezados
+                    const top = curY;
+                    pdf.setFillColor(236, 240, 242); pdf.rect(ML, top, colW, subH, 'F'); pdf.rect(ML + colW, top, colW, subH, 'F');
+                    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(7.5); pdf.setTextColor(42, 92, 110);
+                    pdf.text('MÉTODO', ML + pad, top + 4); pdf.text('DISPOSITIVO DE BLOQUEO', ML + colW + pad, top + 4);
+                    curY = top + subH;
+                    const bodyTop = curY;
+                    const yL = drawCol(ML, bodyTop, mLines, p.metodoFotos, colW, pad);
+                    const yR = drawCol(ML + colW, bodyTop, dLines, p.dispFotos, colW, pad);
+                    const bottom = Math.max(yL, yR) + 2;
+                    pdf.setDrawColor(150, 150, 150); pdf.setLineWidth(0.3);
+                    pdf.rect(ML, top, CW, bottom - top); pdf.line(ML + colW, top, ML + colW, bottom);
+                    curY = bottom + 4;
+                };
+
+                // ── HEADER ──
+                drawHeader();
+                // ── 1. EQUIPO ──
+                sectionTitle('Identificación del equipo');
+                fieldRow('Equipo', data.equipo);
+                fieldRow('Área', data.area);
+                fieldRow('Ubicación', data.ubicacion);
+                fieldRow('Descripción del trabajo', data.descripcion);
+                curY += 2;
+                // ── IMPORTANTE ──
+                if (data.importante) noteBox('IMPORTANTE: ' + data.importante);
+                // ── PASOS ANTES ──
+                sectionTitle('Pasos antes del bloqueo y etiquetado');
+                pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(30, 30, 30);
+                (data.pasosAntesSteps || []).forEach((s, i) => { const lines = pdf.splitTextToSize(`${i + 1}) ${s || ''}`, CW - 4); lines.forEach((l, j) => { ensureSpace(5); pdf.text(l, ML + (j ? 5 : 0), curY + 3); curY += 4.6; }); });
+                curY += 2;
+                // ── ENERGÍAS ──
+                sectionTitle('Identificación de energías a bloquear');
+                data.puntos.forEach((p, i) => { ensureSpace(7); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.setTextColor(42, 92, 110); pdf.text(`PUNTO N° ${i + 1} (${p.tipo}):`, ML, curY + 3); const w = pdf.getTextWidth(`PUNTO N° ${i + 1} (${p.tipo}): `); pdf.setFont('helvetica', 'normal'); pdf.setTextColor(30, 30, 30); const lines = pdf.splitTextToSize(p.descripcion || '—', CW - w - 2); pdf.text(lines, ML + w, curY + 3); curY += Math.max(5, lines.length * 4.6) + 1; });
+                curY += 3;
+                // ── MÉTODO Y DISPOSITIVOS ──
+                sectionTitle('Método y dispositivos de bloqueo');
+                data.puntos.forEach((p, i) => drawPunto(p, i));
+                curY += 1;
+                // ── PASOS RETIRAR ──
+                sectionTitle('Pasos para retirar el bloqueo y etiquetado');
+                pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9); pdf.setTextColor(30, 30, 30);
+                (data.pasosRetirarSteps || []).forEach((s, i) => { const lines = pdf.splitTextToSize(`${i + 1}) ${s || ''}`, CW - 4); lines.forEach((l, j) => { ensureSpace(5); pdf.text(l, ML + (j ? 5 : 0), curY + 3); curY += 4.6; }); });
+                curY += 4;
+                // ── SANCIONES ──
+                if (data.sanciones) noteBox(data.sanciones, [146, 64, 14]);
+                // ── FIRMA ──
+                ensureSpace(46);
+                sectionTitle('Elaborado por / responsable');
+                const fbw = 90, fbx = ML + (CW - fbw) / 2; let fy = curY + 2;
+                if (data.firma) { try { const pr = pdf.getImageProperties(data.firma); const ratio = pr.width / pr.height; let w = fbw, h = w / ratio; if (h > 24) { h = 24; w = h * ratio; } pdf.addImage(data.firma, imgFormat(data.firma), fbx + (fbw - w) / 2, fy + (24 - h), w, h); } catch (e) {} }
+                fy += 26; pdf.setDrawColor(42, 92, 110); pdf.setLineWidth(0.5); pdf.line(fbx, fy, fbx + fbw, fy); fy += 4;
+                pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5); pdf.setTextColor(20, 20, 20); pdf.text(data.elaboradoPor || 'Responsable', fbx + fbw / 2, fy, { align: 'center' }); fy += 4;
+                pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7); pdf.setTextColor(110, 110, 110); pdf.text(data.cargo || 'Río Loa S.A.', fbx + fbw / 2, fy, { align: 'center' });
+
+                // ── PIE ──
+                const total = pdf.internal.getNumberOfPages();
+                for (let pg = 1; pg <= total; pg++) { pdf.setPage(pg); pdf.setDrawColor(225, 225, 225); pdf.setLineWidth(0.2); pdf.line(ML, PH - 10, PW - MR, PH - 10); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.5); pdf.setTextColor(130, 130, 130); pdf.text(`${data.codigo || ''} · v${data.version || ''} · ${EJECUTORA}`, ML, PH - 5); pdf.text(`Página ${pg} de ${total}`, PW - MR, PH - 5, { align: 'right' }); }
+
+                const limpio = (data.equipo || 'Instructivo').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+                return { pdf, filename: `LOTO ${limpio}.pdf` };
+            };
+
+            const conPDF = (accion, val = true) => { if (typeof window.jspdf === 'undefined') { alert('Las herramientas aún se están cargando, intenta de nuevo en unos segundos.'); return; } if (val && !validar()) return; setIsGenerating(true); try { return accion(buildPDF()); } catch (e) { console.error(e); alert('Error con el PDF: ' + (e && e.message)); } finally { setIsGenerating(false); } };
+            const imprimir = () => conPDF(({ pdf }) => { pdf.autoPrint(); window.open(pdf.output('bloburl'), '_blank'); });
+            const descargarPDF = () => conPDF(({ pdf, filename }) => pdf.save(filename));
+            const vistaPrevia = () => conPDF(({ pdf }) => window.open(pdf.output('bloburl'), '_blank'));
+
+            // ENVIAR: comparte el PDF adjunto por el menú nativo del celular (WhatsApp, correo, etc.)
+            const enviar = async () => {
+                if (typeof window.jspdf === 'undefined') { alert('Las herramientas aún se están cargando, intenta de nuevo en unos segundos.'); return; }
+                if (!validar()) return;
+                setIsGenerating(true);
+                let pdf, filename;
+                try {
+                    const built = buildPDF(); pdf = built.pdf; filename = built.filename;
+                    const file = new File([pdf.output('blob')], filename, { type: 'application/pdf' });
+                    const texto = `Instructivo LOTO — ${data.equipo || ''}${data.area ? ' · ' + data.area : ''}. Adjunto el PDF.`;
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        await navigator.share({ files: [file], title: 'Instructivo LOTO — Río Loa', text: texto });
+                    } else {
+                        pdf.save(filename);
+                        alert('Este navegador no permite compartir el PDF automáticamente, así que se descargó.\n\nPara enviarlo por WhatsApp directo, abre la app en Chrome desde el celular.');
+                    }
+                } catch (e) {
+                    if (e && e.name === 'AbortError') { setIsGenerating(false); return; }
+                    console.error(e);
+                    try { if (pdf) pdf.save(filename || 'LOTO.pdf'); } catch (x) {}
+                    alert('No se pudo compartir automáticamente; se descargó el PDF.');
+                } finally { setIsGenerating(false); }
+            };
+
+            const inputCls = "w-full p-3 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:border-sky-400 outline-none text-base transition";
+            const Label = ({ children }) => <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1">{children}</label>;
+
+            return (
+                <div className="min-h-screen text-slate-800">
+                    <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm no-print">
+                        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
+                            <LogoRioLoa height={30} />
+                            <div className="hidden sm:block border-l border-slate-200 pl-3">
+                                <div className="text-sm font-black uppercase tracking-tight text-slate-700 leading-none">Instructivo LOTO</div>
+                                <div className="text-[11px] text-slate-400 uppercase tracking-wide">Bloqueo y etiquetado</div>
+                            </div>
+                            <div className="ml-auto flex items-center gap-2">
+                                <button onClick={() => setLibOpen(o => !o)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white text-slate-600 border border-slate-300 hover:bg-slate-100 transition"><Book size={15} /> <span className="hidden sm:inline">Biblioteca</span> ({lib.length})</button>
+                                <button onClick={vistaPrevia} disabled={isGenerating} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-white text-slate-600 border border-slate-300 hover:bg-slate-100 transition"><Eye size={15} /> <span className="hidden sm:inline">Vista previa</span></button>
+                                <button onClick={enviar} disabled={isGenerating} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-black uppercase tracking-wide text-white shadow transition" style={{ background: isGenerating ? '#94a3b8' : '#16a34a' }}>{isGenerating ? <Loader size={18} className="animate-spin" /> : <Send size={18} />} <span className="hidden sm:inline">Enviar</span></button>
+                                <button onClick={imprimir} disabled={isGenerating} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-black uppercase tracking-wide text-white shadow transition" style={{ background: isGenerating ? '#94a3b8' : TEAL }}>{isGenerating ? <Loader size={18} className="animate-spin" /> : <Printer size={18} />} Imprimir</button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="max-w-3xl mx-auto p-4 md:p-6 space-y-5 pb-28">
+                        {/* Tamaño de letra */}
+                        <div className="flex items-center justify-center gap-2 no-print">
+                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Tamaño de letra</span>
+                            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1 shadow-sm">{ESCALAS.map((e, i) => (<button key={e.id} onClick={() => setEscalaIdx(i)} className="rounded-md font-black leading-none transition" style={{ fontSize: (14 + i * 5) + 'px', padding: '4px 12px', background: escalaIdx === i ? TEAL : 'transparent', color: escalaIdx === i ? '#fff' : '#475569' }}>A</button>))}</div>
+                        </div>
+
+                        {/* Biblioteca */}
+                        {libOpen && (
+                            <div className="bg-white rounded-xl border-2 border-sky-200 shadow-sm p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="flex items-center gap-2 font-black uppercase tracking-tight text-slate-700"><Book size={16} /> Biblioteca de instructivos</h3>
+                                    <button onClick={nuevoInstructivo} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-600 border border-slate-300 hover:bg-slate-100"><FilePlus size={14} /> Nuevo</button>
+                                </div>
+                                {lib.length === 0 ? <p className="text-sm text-slate-400 py-4 text-center">Aún no hay instructivos guardados. Llena uno y toca “Guardar en biblioteca”.</p> : (
+                                    <ul className="space-y-2">
+                                        {lib.slice().reverse().map(it => (
+                                            <li key={it.id} className={`flex items-center gap-2 p-2.5 rounded-lg border ${cargadoDeId === it.id ? 'border-sky-300 bg-sky-50' : 'border-slate-200'}`}>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-bold text-slate-700 truncate">{it.equipo || '(sin nombre)'}{cargadoDeId === it.id && <span className="ml-2 text-[10px] uppercase font-black text-sky-600">editando</span>}</div>
+                                                    <div className="text-[11px] text-slate-400">{it.area || '—'} · guardado {it.savedAt}</div>
+                                                </div>
+                                                <button onClick={() => cargarBiblioteca(it)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: TEAL }}>Abrir</button>
+                                                <button onClick={() => eliminarBiblioteca(it.id)} className="text-slate-400 hover:text-red-500 p-1"><Trash2 size={16} /></button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                            </div>
+                        )}
+
+                        {/* 1. Equipo */}
+                        <Section n="1" title="Identificación del equipo">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div><Label>Equipo</Label><input className={inputCls} value={data.equipo} onChange={e => set('equipo', e.target.value)} placeholder="Ej: Gemelas (Cintas 5.4.0.1 y 5.4.0.2)" /></div>
+                                <div><Label>Área</Label><select className={inputCls} value={data.area} onChange={e => set('area', e.target.value)}><option value="">Seleccione área…</option>{AREAS.map(a => <option key={a} value={a}>{a}</option>)}</select></div>
+                                <div><Label>Ubicación</Label><input className={inputCls} value={data.ubicacion} onChange={e => set('ubicacion', e.target.value)} placeholder="Ej: Piso N° 4" /></div>
+                                <div className="sm:col-span-2"><Label>Descripción del trabajo</Label><textarea lang="es" spellCheck={true} className={`${inputCls} h-20`} value={data.descripcion} onChange={e => set('descripcion', e.target.value)} placeholder="Ej: Limpieza manual de las cintas transportadoras gemelas." /></div>
+                            </div>
+                        </Section>
+
+                        {/* 2. Pasos antes */}
+                        <Section n="2" title="Pasos antes del bloqueo" right={<button onClick={addPasoA} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white shadow-sm transition" style={{ background: TEAL }}><Plus size={15} /> Agregar paso</button>}>
+                            {pasosA.length === 0 && (<div className="text-center py-6 text-slate-400"><p className="text-sm font-semibold">Sin pasos aún.</p><p className="text-xs">Toca “Agregar paso” para escribir el primero.</p></div>)}
+                            <div className="space-y-2">
+                                {pasosA.map((s, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <span className="mt-3 font-black text-sm tabular-nums shrink-0" style={{ color: TEAL }}>{i + 1})</span>
+                                        <textarea lang="es" spellCheck={true} className={`${inputCls} h-14 flex-1`} value={s} onChange={e => updPasoA(i, e.target.value)} placeholder={`Texto del paso ${i + 1}…`} />
+                                        <div className="flex flex-col items-center pt-1 shrink-0">
+                                            <button onClick={() => movePasoA(i, -1)} disabled={i === 0} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none" title="Subir">▲</button>
+                                            <button onClick={() => movePasoA(i, 1)} disabled={i === pasosA.length - 1} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none" title="Bajar">▼</button>
+                                            <button onClick={() => delPasoA(i)} className="text-slate-400 hover:text-red-500 mt-0.5" title="Eliminar"><Trash2 size={15} /></button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </Section>
+
+                        {/* 3. Puntos */}
+                        <Section n="3" title="Puntos de energía a bloquear" right={<button onClick={addPunto} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white shadow-sm transition" style={{ background: TEAL }}><Plus size={15} /> Agregar punto</button>}>
+                            {data.puntos.length === 0 && (<div className="text-center py-8 text-slate-400"><Zap size={30} className="mx-auto mb-2 opacity-50" /><p className="text-sm font-semibold">Aún no hay puntos de bloqueo.</p><p className="text-xs">Toca “Agregar punto” para registrar el primero.</p></div>)}
+                            <div className="space-y-5">
+                                {data.puntos.map((p, i) => (
+                                    <div key={p.id} className="rounded-xl border-2 border-slate-200 overflow-hidden">
+                                        <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50">
+                                            <span className="font-black text-sm uppercase tracking-tight" style={{ color: TEAL }}>Punto N° {i + 1}</span>
+                                            <div className="flex items-center gap-1">
+                                                <button onClick={() => movePunto(p.id, -1)} disabled={i === 0} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 px-1" title="Subir">▲</button>
+                                                <button onClick={() => movePunto(p.id, 1)} disabled={i === data.puntos.length - 1} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 px-1" title="Bajar">▼</button>
+                                                <button onClick={() => delPunto(p.id)} className="text-slate-400 hover:text-red-500 ml-1"><Trash2 size={16} /></button>
+                                            </div>
+                                        </div>
+                                        <div className="p-4 space-y-4 bg-white">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                <div><Label>Tipo de energía</Label><select className={inputCls} value={p.tipo} onChange={e => updPunto(p.id, 'tipo', e.target.value)}>{TIPOS_ENERGIA.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+                                                <div><Label>Identificación / ubicación del punto</Label><input className={inputCls} value={p.descripcion} onChange={e => updPunto(p.id, 'descripcion', e.target.value)} placeholder="Ej: Tablero eléctrico del motor de la cinta 5.4.0.2" /></div>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="space-y-2">
+                                                    <Label>Método</Label>
+                                                    <textarea lang="es" spellCheck={true} className={`${inputCls} h-28`} value={p.metodo} onChange={e => updPunto(p.id, 'metodo', e.target.value)} />
+                                                    <MultiFoto fotos={p.metodoFotos || []} onAdd={v => addFoto(p.id, 'metodoFotos', v)} onRemove={k => delFoto(p.id, 'metodoFotos', k)} label="Foto del método" />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label>Dispositivo de bloqueo</Label>
+                                                    <textarea lang="es" spellCheck={true} className={`${inputCls} h-28`} value={p.dispositivo} onChange={e => updPunto(p.id, 'dispositivo', e.target.value)} />
+                                                    <MultiFoto fotos={p.dispFotos || []} onAdd={v => addFoto(p.id, 'dispFotos', v)} onRemove={k => delFoto(p.id, 'dispFotos', k)} label="Foto del dispositivo" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </Section>
+
+                        {/* 4. Pasos retirar */}
+                        <Section n="4" title="Pasos para retirar el bloqueo" right={<button onClick={addPaso} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white shadow-sm transition" style={{ background: TEAL }}><Plus size={15} /> Agregar paso</button>}>
+                            {pasos.length === 0 && (<div className="text-center py-6 text-slate-400"><p className="text-sm font-semibold">Sin pasos aún.</p><p className="text-xs">Toca “Agregar paso” para escribir el primero.</p></div>)}
+                            <div className="space-y-2">
+                                {pasos.map((s, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <span className="mt-3 font-black text-sm tabular-nums shrink-0" style={{ color: TEAL }}>{i + 1})</span>
+                                        <textarea lang="es" spellCheck={true} className={`${inputCls} h-14 flex-1`} value={s} onChange={e => updPaso(i, e.target.value)} placeholder={`Texto del paso ${i + 1}…`} />
+                                        <div className="flex flex-col items-center pt-1 shrink-0">
+                                            <button onClick={() => movePaso(i, -1)} disabled={i === 0} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none" title="Subir">▲</button>
+                                            <button onClick={() => movePaso(i, 1)} disabled={i === pasos.length - 1} className="text-slate-400 hover:text-slate-700 disabled:opacity-30 leading-none" title="Bajar">▼</button>
+                                            <button onClick={() => delPaso(i)} className="text-slate-400 hover:text-red-500 mt-0.5" title="Eliminar"><Trash2 size={15} /></button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </Section>
+
+                        {/* 5. Responsable y firma */}
+                        <Section n="5" title="Responsable y firma">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <Label>Elaborado por</Label>
+                                    <select className={inputCls} value={data.elaboradoPor} onChange={e => selResp(e.target.value)}>
+                                        <option value="">Seleccione…</option>
+                                        {RESPONSABLES.map(g => <optgroup key={g.grupo} label={g.grupo}>{g.personas.map(p => <option key={p.n} value={p.n}>{p.n} — {p.cargo}</option>)}</optgroup>)}
+                                    </select>
+                                </div>
+                                <div><Label>Cargo</Label><input className={inputCls} value={data.cargo} onChange={e => set('cargo', e.target.value)} placeholder="Se completa solo" /></div>
+                            </div>
+                            <div className="bg-slate-50 rounded-xl border border-slate-200 p-4">
+                                <p className="text-xs font-black uppercase tracking-tight mb-2" style={{ color: TEAL }}>Firma del responsable</p>
+                                <FirmaPad value={data.firma} onChange={v => set('firma', v)} />
+                            </div>
+                        </Section>
+
+                        {/* Botones grandes */}
+                        <button onClick={imprimir} disabled={isGenerating} className="w-full flex items-center justify-center gap-2 py-4 rounded-xl text-base font-black uppercase tracking-wide text-white shadow-lg transition" style={{ background: isGenerating ? '#94a3b8' : TEAL }}>{isGenerating ? <Loader size={20} className="animate-spin" /> : <Printer size={20} />} Imprimir instructivo</button>
+                        <button onClick={enviar} disabled={isGenerating} className="w-full flex items-center justify-center gap-2 py-4 rounded-xl text-base font-black uppercase tracking-wide text-white shadow-lg transition" style={{ background: isGenerating ? '#94a3b8' : '#16a34a' }}>{isGenerating ? <Loader size={20} className="animate-spin" /> : <Send size={20} />} Enviar por WhatsApp</button>
+
+                        {/* Acciones */}
+                        <div className="flex items-center justify-center flex-wrap gap-x-5 gap-y-2 pt-1 text-xs">
+                            <span className="flex items-center gap-1 text-emerald-600 font-semibold"><Save size={13} /> {saveNote}</span>
+                            <button onClick={guardarBiblioteca} className="flex items-center gap-1 font-semibold hover:underline" style={{ color: TEAL }}><Book size={14} /> Guardar en biblioteca</button>
+                            <button onClick={descargarPDF} className="flex items-center gap-1 text-slate-500 font-semibold hover:underline"><Download size={14} /> Descargar PDF</button>
+                            <button onClick={nuevoInstructivo} className="flex items-center gap-1 text-slate-500 font-semibold hover:underline"><FilePlus size={14} /> Nuevo</button>
+                        </div>
+
+                        {/* Ajustes */}
+                        <div className="pt-2">
+                            <button onClick={() => setAjustesOpen(o => !o)} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-700 font-semibold mx-auto"><Settings size={13} /> Ajustes y respaldo {ajustesOpen ? '▲' : '▼'}</button>
+                            {ajustesOpen && (
+                                <div className="mt-3 bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        <div><Label>Código</Label><input className={inputCls} value={data.codigo} onChange={e => set('codigo', e.target.value)} /></div>
+                                        <div><Label>Versión</Label><input className={inputCls} value={data.version} onChange={e => set('version', e.target.value)} /></div>
+                                        <div><Label>Fecha</Label><input className={inputCls} value={data.fecha} onChange={e => set('fecha', e.target.value)} /></div>
+                                    </div>
+                                    <div><Label>Texto “IMPORTANTE”</Label><textarea className={`${inputCls} h-16`} value={data.importante} onChange={e => set('importante', e.target.value)} /></div>
+                                    <div><Label>Nota de sanciones</Label><textarea className={`${inputCls} h-16`} value={data.sanciones} onChange={e => set('sanciones', e.target.value)} /></div>
+                                    <div>
+                                        <Label>Logo</Label>
+                                        {data.logo ? <div className="flex items-center gap-2"><img src={data.logo} className="h-8 object-contain" /><button onClick={() => set('logo', null)} className="text-[11px] text-slate-400 hover:text-red-500 underline">quitar</button></div> : <div className="flex items-center gap-2"><LogoRioLoa height={24} /><label className="text-[11px] text-sky-600 hover:underline cursor-pointer flex items-center gap-1"><Upload size={12} /> reemplazar<input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files[0]; if (f) fileToDataURL(f, v => set('logo', v)); }} /></label></div>}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
+                                        <button onClick={exportarRespaldo} className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold hover:text-sky-600"><Database size={14} /> Exportar respaldo (JSON)</button>
+                                        <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold hover:text-sky-600 cursor-pointer"><Upload size={14} /> Importar respaldo<input type="file" accept="application/json,.json" className="hidden" onChange={importarRespaldo} /></label>
+                                    </div>
+                                    <p className="text-[11px] text-slate-400">La biblioteca y el borrador viven en este navegador. Exporta respaldo para no perderlos si se limpia la caché.</p>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+
+    <script>
+        (function () {
+            try {
+                var src = document.getElementById('app-source').textContent;
+                var out = Babel.transform(src, { presets: [['react', { runtime: 'classic' }]] }).code;
+                (0, eval)(out);
+            } catch (e) {
+                console.error(e);
+                document.getElementById('root').innerHTML = '<div style="padding:24px;font-family:sans-serif;color:#b91c1c">Error al iniciar la app: ' + (e && e.message) + '</div>';
+            }
+        })();
+    </script>
+</body>
+</html>
