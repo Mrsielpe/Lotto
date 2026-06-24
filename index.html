@@ -234,6 +234,54 @@
             const exportarRespaldo = () => descargar(new Blob([JSON.stringify({ draft: data, lib }, null, 2)], { type: 'application/json' }), `respaldo_loto_${new Date().toISOString().slice(0, 10)}.json`);
             const importarRespaldo = (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const r = new FileReader(); r.onload = () => { try { const o = JSON.parse(r.result); if (o.lib && Array.isArray(o.lib) && confirm('¿Reemplazar la biblioteca con el respaldo?')) setLib(o.lib); if (o.draft) setData({ ...defaultData(), ...o.draft }); } catch (err) { alert('Respaldo no válido: ' + err.message); } }; r.readAsText(f); };
 
+            // Exportar a WORD (.doc editable) — se abre en Word/cualquier procesador en el PC
+            const nombreArchivo = () => (data.equipo || 'Instructivo').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const nl2br = (s) => esc(s).replace(/\n/g, '<br>');
+            const imgsHTML = (fotos) => (fotos || []).map(f => `<br><img src="${f}" style="width:210px;height:auto;margin-top:6px;"/>`).join('');
+            const construirWord = () => {
+                const T = '#2A5C6E';
+                const pasosOL = (arr) => `<ol style="margin:4px 0 8px 18px;padding:0;">${(arr || []).map(s => `<li>${nl2br(s)}</li>`).join('')}</ol>`;
+                const energiasUL = data.puntos.map((p, i) => `<p style="margin:2px 0;"><b>PUNTO N° ${i + 1} (${esc(p.tipo)}):</b> ${esc(p.descripcion)}</p>`).join('');
+                const puntosTabla = data.puntos.map((p, i) => `
+                    <p style="margin:10px 0 2px;"><b style="color:${T};">PUNTO N° ${i + 1}</b> &nbsp; — &nbsp; Energía: ${esc(p.tipo)}</p>
+                    <p style="margin:0 0 4px;font-size:10pt;">Identificación / ubicación: ${esc(p.descripcion)}</p>
+                    <table border="1" cellspacing="0" cellpadding="6" width="100%" style="border-collapse:collapse;font-size:10.5pt;">
+                        <tr style="background:#eceff2;"><th width="50%" style="color:${T};text-align:left;">MÉTODO</th><th width="50%" style="color:${T};text-align:left;">DISPOSITIVO DE BLOQUEO</th></tr>
+                        <tr><td valign="top">${nl2br(p.metodo)}${imgsHTML(p.metodoFotos)}</td><td valign="top">${nl2br(p.dispositivo)}${imgsHTML(p.dispFotos)}</td></tr>
+                    </table>`).join('');
+                const logoHTML = data.logo ? `<img src="${data.logo}" style="height:34px;"/>` : `<span style="font-family:Arial;font-weight:900;font-size:24pt;"><span style="color:${T};">RIO</span><span style="color:#4A90B8;">LOA</span></span>`;
+                const firmaHTML = data.firma ? `<img src="${data.firma}" style="width:200px;height:auto;"/><br>` : '';
+                const sec = (t) => `<div style="background:${T};color:#fff;font-weight:bold;padding:4px 8px;margin:12px 0 6px;text-transform:uppercase;font-size:11pt;">${t}</div>`;
+                const body = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div>${logoHTML}</div>
+                        <div style="text-align:right;font-size:9pt;color:#555;">Código: ${esc(data.codigo)} · Versión: ${esc(data.version)}<br>Fecha: ${esc(data.fecha)}</div>
+                    </div>
+                    <h2 style="text-align:center;color:${T};margin:6px 0 0;">INSTRUCTIVO DE BLOQUEO Y ETIQUETADO — LOTO</h2>
+                    <p style="text-align:center;color:#888;margin:0 0 8px;font-size:9pt;">Lockout / Tagout</p>
+                    <hr>
+                    ${sec('Identificación del equipo')}
+                    <table cellpadding="4" style="font-size:10.5pt;"><tr><td><b>Equipo:</b></td><td>${esc(data.equipo)}</td></tr><tr><td><b>Área:</b></td><td>${esc(data.area)}</td></tr><tr><td><b>Ubicación:</b></td><td>${esc(data.ubicacion)}</td></tr><tr><td valign="top"><b>Descripción:</b></td><td>${nl2br(data.descripcion)}</td></tr></table>
+                    ${data.importante ? `<p style="border:1px solid #dc2626;background:#fff7ed;color:#b91c1c;padding:6px 8px;font-weight:bold;">IMPORTANTE: ${esc(data.importante)}</p>` : ''}
+                    ${sec('Pasos antes del bloqueo y etiquetado')}${pasosOL(data.pasosAntesSteps)}
+                    ${sec('Identificación de energías a bloquear')}${energiasUL}
+                    ${sec('Método y dispositivos de bloqueo')}${puntosTabla}
+                    ${sec('Pasos para retirar el bloqueo y etiquetado')}${pasosOL(data.pasosRetirarSteps)}
+                    ${data.sanciones ? `<p style="border:1px solid #92400e;background:#fffbeb;color:#92400e;padding:6px 8px;">${esc(data.sanciones)}</p>` : ''}
+                    ${sec('Elaborado por / responsable')}
+                    <div style="text-align:center;margin-top:10px;">${firmaHTML}<div style="border-top:1px solid ${T};width:260px;margin:0 auto;"></div><b>${esc(data.elaboradoPor || 'Responsable')}</b><br><span style="font-size:9pt;color:#666;">${esc(data.cargo || EJECUTORA)}</span></div>`;
+                return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Instructivo LOTO — ${esc(data.equipo)}</title></head><body style="font-family:Arial,sans-serif;font-size:11pt;color:#222;">${body}</body></html>`;
+            };
+            const exportarWord = async () => {
+                if (!data.equipo.trim()) { alert('Escribe el nombre del equipo antes de exportar.'); return; }
+                if (data.puntos.length === 0) { alert('Agrega al menos un punto de bloqueo.'); return; }
+                const filename = `Lotto ${nombreArchivo()}.doc`;
+                const html = '﻿' + construirWord();
+                try { const file = new File([html], filename, { type: 'application/msword' }); if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Instructivo LOTO (editable)', text: `Instructivo editable — ${data.equipo}` }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
+                descargar(new Blob([html], { type: 'application/msword' }), filename);
+            };
+
             // ─────────── PDF ───────────
             const validar = () => { if (!data.equipo.trim()) { alert('Escribe el nombre del equipo.'); return false; } if (data.puntos.length === 0) { alert('Agrega al menos un punto de bloqueo.'); return false; } return true; };
 
@@ -342,7 +390,7 @@
                 for (let pg = 1; pg <= total; pg++) { pdf.setPage(pg); pdf.setDrawColor(225, 225, 225); pdf.setLineWidth(0.2); pdf.line(ML, PH - 10, PW - MR, PH - 10); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6.5); pdf.setTextColor(130, 130, 130); pdf.text(`${data.codigo || ''} · v${data.version || ''} · ${EJECUTORA}`, ML, PH - 5); pdf.text(`Página ${pg} de ${total}`, PW - MR, PH - 5, { align: 'right' }); }
 
                 const limpio = (data.equipo || 'Instructivo').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
-                return { pdf, filename: `LOTO ${limpio}.pdf` };
+                return { pdf, filename: `Lotto ${limpio}.pdf` };
             };
 
             const conPDF = (accion, val = true) => { if (typeof window.jspdf === 'undefined') { alert('Las herramientas aún se están cargando, intenta de nuevo en unos segundos.'); return; } if (val && !validar()) return; setIsGenerating(true); try { return accion(buildPDF()); } catch (e) { console.error(e); alert('Error con el PDF: ' + (e && e.message)); } finally { setIsGenerating(false); } };
@@ -536,6 +584,7 @@
                             <span className="flex items-center gap-1 text-emerald-600 font-semibold"><Save size={13} /> {saveNote}</span>
                             <button onClick={guardarBiblioteca} className="flex items-center gap-1 font-semibold hover:underline" style={{ color: TEAL }}><Book size={14} /> Guardar en biblioteca</button>
                             <button onClick={descargarPDF} className="flex items-center gap-1 text-slate-500 font-semibold hover:underline"><Download size={14} /> Descargar PDF</button>
+                            <button onClick={exportarWord} className="flex items-center gap-1 font-semibold hover:underline" style={{ color: '#1d4ed8' }}><Download size={14} /> Exportar a Word (editable)</button>
                             <button onClick={nuevoInstructivo} className="flex items-center gap-1 text-slate-500 font-semibold hover:underline"><FilePlus size={14} /> Nuevo</button>
                         </div>
 
