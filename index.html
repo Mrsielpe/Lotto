@@ -186,9 +186,12 @@
             const [ajustesOpen, setAjustesOpen] = useState(false);
             const [isGenerating, setIsGenerating] = useState(false);
             const [saveNote, setSaveNote] = useState('Guardado');
+            const [arranqueOpen, setArranqueOpen] = useState(false);
             const [escalaIdx, setEscalaIdx] = useState(() => { try { return Math.min(2, Math.max(0, parseInt(localStorage.getItem(ESCALA_KEY) || '0', 10) || 0)); } catch (e) { return 0; } });
 
             useEffect(() => { document.documentElement.style.fontSize = ESCALAS[escalaIdx].px + 'px'; try { localStorage.setItem(ESCALA_KEY, String(escalaIdx)); } catch (e) {} }, [escalaIdx]);
+            // Al abrir: si hay un instructivo de la última sesión, preguntar si continuar o empezar nuevo (no auto-continúa).
+            useEffect(() => { try { const r = localStorage.getItem(DRAFT_KEY); if (r) { const d = JSON.parse(r); if (d && (String(d.equipo || '').trim() || (d.puntos && d.puntos.length))) setArranqueOpen(true); } } catch (e) {} }, []);
             useEffect(() => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(data)); setSaveNote('Guardado'); } catch (e) { try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...data, logo: null, firma: null, puntos: data.puntos.map(p => ({ ...p, metodoFotos: [], dispFotos: [] })) })); setSaveNote('Guardado (sin imágenes por tamaño)'); } catch (e2) { setSaveNote('No se pudo guardar'); } } }, [data]);
             useEffect(() => { try { localStorage.setItem(LIB_KEY, JSON.stringify(lib)); } catch (e) {} }, [lib]);
 
@@ -234,52 +237,29 @@
             const exportarRespaldo = () => descargar(new Blob([JSON.stringify({ draft: data, lib }, null, 2)], { type: 'application/json' }), `respaldo_loto_${new Date().toISOString().slice(0, 10)}.json`);
             const importarRespaldo = (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const r = new FileReader(); r.onload = () => { try { const o = JSON.parse(r.result); if (o.lib && Array.isArray(o.lib) && confirm('¿Reemplazar la biblioteca con el respaldo?')) setLib(o.lib); if (o.draft) setData({ ...defaultData(), ...o.draft }); } catch (err) { alert('Respaldo no válido: ' + err.message); } }; r.readAsText(f); };
 
-            // Exportar a WORD (.doc editable) — se abre en Word/cualquier procesador en el PC
-            const nombreArchivo = () => (data.equipo || 'Instructivo').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
-            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const nl2br = (s) => esc(s).replace(/\n/g, '<br>');
-            const imgsHTML = (fotos) => (fotos || []).map(f => `<br><img src="${f}" style="width:210px;height:auto;margin-top:6px;"/>`).join('');
-            const construirWord = () => {
-                const T = '#2A5C6E';
-                const pasosOL = (arr) => `<ol style="margin:4px 0 8px 18px;padding:0;">${(arr || []).map(s => `<li>${nl2br(s)}</li>`).join('')}</ol>`;
-                const energiasUL = data.puntos.map((p, i) => `<p style="margin:2px 0;"><b>PUNTO N° ${i + 1} (${esc(p.tipo)}):</b> ${esc(p.descripcion)}</p>`).join('');
-                const puntosTabla = data.puntos.map((p, i) => `
-                    <p style="margin:10px 0 2px;"><b style="color:${T};">PUNTO N° ${i + 1}</b> &nbsp; — &nbsp; Energía: ${esc(p.tipo)}</p>
-                    <p style="margin:0 0 4px;font-size:10pt;">Identificación / ubicación: ${esc(p.descripcion)}</p>
-                    <table border="1" cellspacing="0" cellpadding="6" width="100%" style="border-collapse:collapse;font-size:10.5pt;">
-                        <tr style="background:#eceff2;"><th width="50%" style="color:${T};text-align:left;">MÉTODO</th><th width="50%" style="color:${T};text-align:left;">DISPOSITIVO DE BLOQUEO</th></tr>
-                        <tr><td valign="top">${nl2br(p.metodo)}${imgsHTML(p.metodoFotos)}</td><td valign="top">${nl2br(p.dispositivo)}${imgsHTML(p.dispFotos)}</td></tr>
-                    </table>`).join('');
-                const logoHTML = data.logo ? `<img src="${data.logo}" style="height:34px;"/>` : `<span style="font-family:Arial;font-weight:900;font-size:24pt;"><span style="color:${T};">RIO</span><span style="color:#4A90B8;">LOA</span></span>`;
-                const firmaHTML = data.firma ? `<img src="${data.firma}" style="width:200px;height:auto;"/><br>` : '';
-                const sec = (t) => `<div style="background:${T};color:#fff;font-weight:bold;padding:4px 8px;margin:12px 0 6px;text-transform:uppercase;font-size:11pt;">${t}</div>`;
-                const body = `
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div>${logoHTML}</div>
-                        <div style="text-align:right;font-size:9pt;color:#555;">Código: ${esc(data.codigo)} · Versión: ${esc(data.version)}<br>Fecha: ${esc(data.fecha)}</div>
-                    </div>
-                    <h2 style="text-align:center;color:${T};margin:6px 0 0;">INSTRUCTIVO DE BLOQUEO Y ETIQUETADO — LOTO</h2>
-                    <p style="text-align:center;color:#888;margin:0 0 8px;font-size:9pt;">Lockout / Tagout</p>
-                    <hr>
-                    ${sec('Identificación del equipo')}
-                    <table cellpadding="4" style="font-size:10.5pt;"><tr><td><b>Equipo:</b></td><td>${esc(data.equipo)}</td></tr><tr><td><b>Área:</b></td><td>${esc(data.area)}</td></tr><tr><td><b>Ubicación:</b></td><td>${esc(data.ubicacion)}</td></tr><tr><td valign="top"><b>Descripción:</b></td><td>${nl2br(data.descripcion)}</td></tr></table>
-                    ${data.importante ? `<p style="border:1px solid #dc2626;background:#fff7ed;color:#b91c1c;padding:6px 8px;font-weight:bold;">IMPORTANTE: ${esc(data.importante)}</p>` : ''}
-                    ${sec('Pasos antes del bloqueo y etiquetado')}${pasosOL(data.pasosAntesSteps)}
-                    ${sec('Identificación de energías a bloquear')}${energiasUL}
-                    ${sec('Método y dispositivos de bloqueo')}${puntosTabla}
-                    ${sec('Pasos para retirar el bloqueo y etiquetado')}${pasosOL(data.pasosRetirarSteps)}
-                    ${data.sanciones ? `<p style="border:1px solid #92400e;background:#fffbeb;color:#92400e;padding:6px 8px;">${esc(data.sanciones)}</p>` : ''}
-                    ${sec('Elaborado por / responsable')}
-                    <div style="text-align:center;margin-top:10px;">${firmaHTML}<div style="border-top:1px solid ${T};width:260px;margin:0 auto;"></div><b>${esc(data.elaboradoPor || 'Responsable')}</b><br><span style="font-size:9pt;color:#666;">${esc(data.cargo || EJECUTORA)}</span></div>`;
-                return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>Instructivo LOTO — ${esc(data.equipo)}</title></head><body style="font-family:Arial,sans-serif;font-size:11pt;color:#222;">${body}</body></html>`;
-            };
-            const exportarWord = async () => {
-                if (!data.equipo.trim()) { alert('Escribe el nombre del equipo antes de exportar.'); return; }
-                if (data.puntos.length === 0) { alert('Agrega al menos un punto de bloqueo.'); return; }
-                const filename = `Lotto ${nombreArchivo()}.doc`;
-                const html = '﻿' + construirWord();
-                try { const file = new File([html], filename, { type: 'application/msword' }); if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Instructivo LOTO (editable)', text: `Instructivo editable — ${data.equipo}` }); return; } } catch (e) { if (e && e.name === 'AbortError') return; }
-                descargar(new Blob([html], { type: 'application/msword' }), filename);
+            // Abrir un PDF creado por esta app y reconstruir el instructivo editable (con fotos).
+            // Los datos van incrustados dentro del propio PDF (ver pdfConDatos), por eso el round-trip es exacto.
+            const DATA_MARK = '%%RIOLOA-LOTO-DATA:';
+            const importarPDF = (e) => {
+                const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+                const r = new FileReader();
+                r.onload = () => {
+                    try {
+                        const bin = new TextDecoder('latin1').decode(new Uint8Array(r.result));
+                        const i = bin.lastIndexOf(DATA_MARK);
+                        if (i < 0) throw new Error('Este PDF no fue creado por esta app, así que no contiene datos editables. Abre uno generado aquí.');
+                        const after = bin.slice(i + DATA_MARK.length);
+                        const end = after.indexOf(':END%%');
+                        const b64 = (end >= 0 ? after.slice(0, end) : after).trim();
+                        const json = decodeURIComponent(escape(atob(b64)));
+                        const obj = JSON.parse(json);
+                        const d = obj && obj.data ? obj.data : obj;
+                        if (!d || typeof d !== 'object' || !('puntos' in d)) throw new Error('Los datos del PDF no son válidos.');
+                        setData({ ...defaultData(), ...d });
+                        setCargadoDeId(null); setArranqueOpen(false); window.scrollTo(0, 0); setSaveNote('PDF abierto para editar');
+                    } catch (err) { alert('No se pudo abrir el PDF: ' + err.message); }
+                };
+                r.readAsArrayBuffer(f);
             };
 
             // ─────────── PDF ───────────
@@ -394,8 +374,19 @@
             };
 
             const conPDF = (accion, val = true) => { if (typeof window.jspdf === 'undefined') { alert('Las herramientas aún se están cargando, intenta de nuevo en unos segundos.'); return; } if (val && !validar()) return; setIsGenerating(true); try { return accion(buildPDF()); } catch (e) { console.error(e); alert('Error con el PDF: ' + (e && e.message)); } finally { setIsGenerating(false); } };
+            // Genera el PDF con los datos editables incrustados al final (para poder reabrirlo y editarlo).
+            const pdfConDatos = (pdf) => {
+                const buf = pdf.output('arraybuffer');
+                const json = JSON.stringify({ _tipo: 'instructivo-loto', _v: 1, data });
+                const b64 = btoa(unescape(encodeURIComponent(json)));
+                const tail = new TextEncoder().encode(`\n${DATA_MARK}${b64}:END%%`);
+                const head = new Uint8Array(buf);
+                const out = new Uint8Array(head.length + tail.length);
+                out.set(head, 0); out.set(tail, head.length);
+                return new Blob([out], { type: 'application/pdf' });
+            };
             const imprimir = () => conPDF(({ pdf }) => { pdf.autoPrint(); window.open(pdf.output('bloburl'), '_blank'); });
-            const descargarPDF = () => conPDF(({ pdf, filename }) => pdf.save(filename));
+            const descargarPDF = () => conPDF(({ pdf, filename }) => descargar(pdfConDatos(pdf), filename));
             const vistaPrevia = () => conPDF(({ pdf }) => window.open(pdf.output('bloburl'), '_blank'));
 
             // ENVIAR: comparte el PDF adjunto por el menú nativo del celular (WhatsApp, correo, etc.)
@@ -406,12 +397,12 @@
                 let pdf, filename;
                 try {
                     const built = buildPDF(); pdf = built.pdf; filename = built.filename;
-                    const file = new File([pdf.output('blob')], filename, { type: 'application/pdf' });
+                    const file = new File([pdfConDatos(pdf)], filename, { type: 'application/pdf' });
                     const texto = `Instructivo LOTO — ${data.equipo || ''}${data.area ? ' · ' + data.area : ''}. Adjunto el PDF.`;
                     if (navigator.canShare && navigator.canShare({ files: [file] })) {
                         await navigator.share({ files: [file], title: 'Instructivo LOTO — Río Loa', text: texto });
                     } else {
-                        pdf.save(filename);
+                        descargar(pdfConDatos(pdf), filename);
                         alert('Este navegador no permite compartir el PDF automáticamente, así que se descargó.\n\nPara enviarlo por WhatsApp directo, abre la app en Chrome desde el celular.');
                     }
                 } catch (e) {
@@ -425,8 +416,26 @@
             const inputCls = "w-full p-3 border border-slate-300 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:border-sky-400 outline-none text-base transition";
             const Label = ({ children }) => <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1">{children}</label>;
 
+            const continuarSesion = () => setArranqueOpen(false);
+            const nuevaSesion = () => { setData(defaultData()); setCargadoDeId(null); setArranqueOpen(false); window.scrollTo(0, 0); };
+
             return (
                 <div className="min-h-screen text-slate-800">
+                    {/* Selector de arranque: continuar la última sesión o empezar nueva */}
+                    {arranqueOpen && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 no-print" style={{ background: 'rgba(15,23,42,0.55)' }}>
+                            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                                <h3 className="text-lg font-black uppercase tracking-tight mb-1" style={{ color: TEAL }}>¿Cómo quieres empezar?</h3>
+                                <p className="text-sm text-slate-500 mb-5">Tienes un instructivo de la última sesión guardado en este equipo. ¿Lo continúas o empiezas uno nuevo?</p>
+                                <div className="space-y-2.5">
+                                    <button onClick={continuarSesion} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-black uppercase tracking-wide text-white shadow transition" style={{ background: TEAL }}><RotateCcw size={18} /> Continuar el último</button>
+                                    <label className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold border-2 border-slate-300 text-slate-600 hover:bg-slate-50 cursor-pointer transition"><Upload size={16} /> Abrir un PDF para editar<input type="file" accept="application/pdf,.pdf" className="hidden" onChange={importarPDF} /></label>
+                                    <button onClick={nuevaSesion} className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold border-2 border-slate-300 text-slate-600 hover:bg-slate-50 transition"><FilePlus size={16} /> Empezar uno nuevo</button>
+                                </div>
+                                <p className="text-[11px] text-slate-400 mt-4">“Empezar nuevo” descarta el de la última sesión. Si no terminaste, mejor continúalo y luego guárdalo en la biblioteca. Un refresco de la página no borra tu trabajo: vuelve a aparecer aquí.</p>
+                            </div>
+                        </div>
+                    )}
                     <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm no-print">
                         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">
                             <LogoRioLoa height={30} />
@@ -584,7 +593,7 @@
                             <span className="flex items-center gap-1 text-emerald-600 font-semibold"><Save size={13} /> {saveNote}</span>
                             <button onClick={guardarBiblioteca} className="flex items-center gap-1 font-semibold hover:underline" style={{ color: TEAL }}><Book size={14} /> Guardar en biblioteca</button>
                             <button onClick={descargarPDF} className="flex items-center gap-1 text-slate-500 font-semibold hover:underline"><Download size={14} /> Descargar PDF</button>
-                            <button onClick={exportarWord} className="flex items-center gap-1 font-semibold hover:underline" style={{ color: '#1d4ed8' }}><Download size={14} /> Exportar a Word (editable)</button>
+                            <label className="flex items-center gap-1 font-semibold hover:underline cursor-pointer" style={{ color: '#1d4ed8' }}><Upload size={14} /> Abrir PDF para editar<input type="file" accept="application/pdf,.pdf" className="hidden" onChange={importarPDF} /></label>
                             <button onClick={nuevoInstructivo} className="flex items-center gap-1 text-slate-500 font-semibold hover:underline"><FilePlus size={14} /> Nuevo</button>
                         </div>
 
